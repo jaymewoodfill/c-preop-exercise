@@ -4,7 +4,10 @@ This take-home implementation is a local deterministic rule engine. If it were d
 
 ## API and access control boundary
 
+`auth.py` includes a dependency-free HMAC bearer-token example to make this boundary concrete for the take-home. In production, replace it with an identity provider and JWT/JWKS validation.
+
 - Authenticate every caller.
+- Verify token signature, issuer/audience, expiry, and required scopes.
 - Derive tenant/account scope from trusted auth context, not request JSON.
 - Authorize access to each patient/case before invoking `triage_submission(...)`.
 - Fetch submissions using tenant-scoped keys, e.g. `(tenant_id, case_id)`.
@@ -75,6 +78,7 @@ Avoid:
 - Broad database roles that bypass tenant filters.
 - Client-side-only authorization checks.
 - Trusting `patient.id`, `mrn`, or `case_id` from request JSON for access control.
+- Using the demo HMAC token format from `auth.py` as-is for production identity.
 - Storing API keys in repo or generated reports.
 
 ## Operational monitoring

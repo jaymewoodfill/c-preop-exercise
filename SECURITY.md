@@ -15,6 +15,7 @@ This project processes patient-like JSON and free-text clinical documents. The i
 - Invalid or missing rule-critical data fails closed to `NEEDS_FOLLOW_UP`.
 - Acute safety exclusions take precedence and return `NOT_CLEARED`.
 - Baseline/eval artifacts omit full submissions by default.
+- Optional `auth.py` boundary verifies signed bearer tokens and enforces tenant/scope checks before triage.
 
 ## Threat model
 
@@ -31,7 +32,9 @@ This project processes patient-like JSON and free-text clinical documents. The i
 - Input JSON is untrusted.
 - Free-text `documents[].text` is untrusted.
 - Local evaluation harness is trusted developer tooling.
-- No account, tenant, database, browser, or web server boundary is in scope for current implementation.
+- `triage_submission(...)` has no account/session context and remains pure for the local harness.
+- `auth.py` demonstrates the API boundary that would sit before `triage_submission(...)` in a service deployment.
+- No database, browser, or web server is in scope for current implementation.
 - No external model or API receives patient-like data during default `make baseline`, `make evals`, or `make determinism` workflows.
 
 ### Primary security goals
@@ -67,22 +70,30 @@ This is a local CLI/library implementation, not a web service. Items below focus
 
 | OWASP AppSec risk | Applicability | Current/future control |
 | --- | --- | --- |
-| Broken Access Control | Not applicable inside the local pure function, but critical if exposed as API | Enforce authentication, tenant scoping, patient-level authorization, and server-side object lookup outside `triage_submission`; never trust client-supplied account/patient identifiers alone. |
+| Broken Access Control | Not applicable inside the local pure function, but critical if exposed as API | Optional `auth.py` demonstrates signed bearer-token auth, tenant scoping, and scope checks before `triage_submission`; production should still use real IdP/JWT/JWKS and server-side object lookup. |
 | Cryptographic Failures | Low locally | Do not commit real patient data or secrets; if deployed, use TLS and encrypted storage/log sinks. |
 | Injection | Relevant for untrusted JSON/text | No SQL, shell, template execution, or `eval`; document text is parsed with deterministic string/date checks only; TUI report strings are Rich-markup escaped. |
 | Insecure Design | Relevant | Conservative state machine: missing/unknown data → `NEEDS_FOLLOW_UP`; acute exclusions → `NOT_CLEARED`. |
 | Security Misconfiguration | Low locally | `.gitignore` excludes generated reports and local env files; eval is local-only by default; OpenAI Eval is explicit opt-in. If deployed, disable debug logs containing PHI. |
 | Vulnerable and Outdated Components | Relevant | No added runtime dependencies; keep starter dependencies current via `uv`/dependency updates. |
-| Identification and Authentication Failures | Not applicable locally | Required only if converted into network service. |
+| Identification and Authentication Failures | Optional boundary only | `auth.py` verifies token signature/expiration and required claims; production should replace demo HMAC tokens with an IdP-managed flow. |
 | Software and Data Integrity Failures | Relevant to evaluation/release | Keep deterministic tests/evals in CI; avoid loading untrusted plugins or code. |
 | Security Logging and Monitoring Failures | Low locally | If deployed, log decisions/issue categories without unnecessary document excerpts, MRNs, names, or other PHI/PII. |
 | SSRF | Not applicable | No outbound URL fetching. If future document ingestion fetches URLs, enforce allowlists and timeouts. |
 
 ## PII/PHI and cross-account access considerations
 
-Current implementation is a local function with no account/session concept, so cross-account enforcement cannot live inside `triage_submission(...)` itself. It should be enforced at the service/data-access boundary if this engine is deployed.
+Current implementation is a local function with no account/session concept, so cross-account enforcement does not live inside `triage_submission(...)` itself. `auth.py` provides an optional service-boundary demonstration that authenticates a bearer token and authorizes tenant access before invoking the engine.
 
-Recommended deployment controls:
+Implemented optional boundary controls:
+
+- HMAC-signed bearer-token verification.
+- Expiration check.
+- Required scope check: `triage:evaluate`.
+- Tenant match between trusted token claim and submission metadata.
+- Rejection of patient-ID-only authorization attempts.
+
+Recommended production deployment controls:
 
 - Authenticate caller before accepting a submission.
 - Authorize access to the patient/case server-side using tenant/account membership.
@@ -140,6 +151,7 @@ Useful future tests if this becomes an API/service:
 - PHI-safe logging assertions.
 - Dependency vulnerability scan in CI.
 - AuthZ tests for tenant/patient separation.
+- Authentication tests for token tampering, expiration, missing scope, and cross-tenant access.
 - Fuzz tests for date parsing and document text variants.
 
 ## Known limitations

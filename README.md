@@ -121,6 +121,42 @@ See also:
 - [`docs/DESIGN_DECISIONS.md`](docs/DESIGN_DECISIONS.md) for key tradeoffs, including why deterministic logic is used and how an LLM could be safely introduced later.
 - [`docs/PRODUCTION_HARDENING.md`](docs/PRODUCTION_HARDENING.md) for API/authZ, PII minimization, logging, and deployment hardening recommendations.
 
+## Optional Authentication Boundary
+
+The local eval harness calls `triage_submission(...)` directly, so authentication is not required for normal assignment workflows. To demonstrate where auth belongs in a deployed API, `auth.py` provides a small dependency-free wrapper:
+
+- verifies HMAC-signed bearer tokens,
+- checks expiration,
+- enforces required scope `triage:evaluate`,
+- enforces tenant/account match using trusted token tenant vs submission metadata,
+- rejects cross-tenant submissions before calling the triage engine.
+
+Example:
+
+```python
+from auth import sign_token, triage_authenticated_submission
+
+secret = "dev-secret"
+token = sign_token(
+    {
+        "sub": "user-123",
+        "tenant_id": "tenant-a",
+        "scopes": ["triage:evaluate"],
+        "exp": 1800000000,
+    },
+    secret,
+)
+
+output = triage_authenticated_submission(
+    submission,
+    headers={"Authorization": f"Bearer {token}"},
+    secret=secret,
+    model="unused",
+)
+```
+
+Production systems would normally use an identity provider and JWT/JWKS validation rather than this demo HMAC token format.
+
 ## Tests
 
 Run all tests with:
@@ -147,11 +183,18 @@ Run focused pentest regression tests:
 make pentest-test
 ```
 
+Authentication boundary tests are included in `make test` and can be run directly with:
+
+```bash
+uv run --with 'pydantic>=2.8.0' --with 'pytest>=8.0.0' python -m pytest tests/test_auth.py
+```
+
 ## Known Limitations
 
 - This is not a clinical safety certification or medical guideline engine; it implements only the supplied assignment policy.
 - Document classification is heuristic and intentionally scoped to the provided policy and dataset patterns.
-- No auth, tenant isolation, database, encryption-at-rest, or audit logging layer is implemented because the starter is a local CLI/eval harness.
+- No persistent users, database, encryption-at-rest, or audit logging layer is implemented because the starter is a local CLI/eval harness.
+- `auth.py` is an optional boundary demonstration, not a replacement for a production identity provider.
 - Evidence details may contain patient-like excerpts; production display/logging should be role-gated and minimized.
 - Generated reports omit full submissions, so the TUI is less useful for raw-data inspection but safer by default.
 - A perfect sample score does not prove general medical correctness beyond the stated policy.
