@@ -76,7 +76,9 @@ def test_missing_bearer_token_is_rejected() -> None:
 
 def test_tampered_token_is_rejected() -> None:
     token = sign_token(valid_payload(), SECRET)
-    tampered = token.replace("a", "b", 1)
+    body, signature = token.split(".", 1)
+    tampered_body = ("A" if body[0] != "A" else "B") + body[1:]
+    tampered = f"{tampered_body}.{signature}"
 
     with pytest.raises(AuthenticationError):
         authenticate_headers({"Authorization": f"Bearer {tampered}"}, SECRET, now=NOW)
