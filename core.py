@@ -207,6 +207,8 @@ def build_user_prompt(submission: dict[str, object]) -> str:
     return "\n".join(sections)
 
 
+# Static list is intentionally small and policy-adjacent: enough to detect sample
+# anticoagulants without importing external medical guidelines.
 ANTICOAGULANTS = {
     "apixaban",
     "eliquis",
@@ -223,6 +225,8 @@ ANTICOAGULANTS = {
     "heparin",
 }
 
+# Negated/vague language must win over keyword matches like "hold"/"resume" so
+# notes such as "no clear hold/resume guidance" fail closed.
 AMBIGUOUS_PLAN_TERMS = (
     "no clear",
     "not yet documented",
@@ -252,6 +256,8 @@ def triage_submission(
     `model` is accepted to preserve the starter API used by the harness.
     """
 
+    # Validate at the boundary, then keep the core side-effect-free. This gives
+    # deterministic behavior and avoids sending patient-like data to an LLM/API.
     if isinstance(submission, PatientSubmission):
         payload = submission.model_dump()
     else:
@@ -263,6 +269,8 @@ def triage_submission(
     procedure_date = _parse_date(procedure_date_raw)
     procedure_risk = procedure.get("procedure_risk")
 
+    # Structured procedure date is treated as authoritative; document text may
+    # mention target dates, but inferring from free text would hide missing data.
     if procedure_date_raw in (None, ""):
         issues.append(_issue("MISSING_REQUIRED_DATA", "Missing procedure date", "procedure.procedure_date", "procedure.procedure_date is null"))
     elif procedure_date is None:
@@ -279,6 +287,8 @@ def triage_submission(
     if procedure_date is not None:
         issues.extend(_documentation_issues(documents, procedure_date))
     else:
+        # Without a procedure date, freshness windows cannot be evaluated, but
+        # presence issues are still useful operational blockers.
         issues.extend(_documentation_presence_issues(documents))
 
     if procedure_date is not None and procedure_risk in {"LOW", "MODERATE", "HIGH"}:
@@ -301,6 +311,8 @@ def triage_submission(
 
     issues.extend(_vital_issues(vitals))
 
+    # Safety exclusions dominate scheduling readiness, while retaining other
+    # follow-up issues in the response for operational visibility.
     if any(issue.category == "ACUTE_SAFETY_EXCLUSION" for issue in issues):
         decision: Decision = "NOT_CLEARED"
     elif issues:
@@ -322,6 +334,8 @@ def _explanation(issues: list[TriageIssue]) -> str:
 
 
 def _documentation_presence_issues(documents: list[dict[str, Any]]) -> list[TriageIssue]:
+    # Used when procedure_date is missing: report missing docs, but avoid
+    # pretending we can evaluate 30-day freshness without the anchor date.
     issues: list[TriageIssue] = []
     hp_docs = [(doc, i, _parse_date(doc.get("date"))) for i, doc in enumerate(documents) if _is_hp_document(doc)]
     consent_docs = [(doc, i) for i, doc in enumerate(documents) if _is_consent_document(doc)]
@@ -383,6 +397,7 @@ def _testing_issues(labs: list[dict[str, Any]], procedure_date: date, procedure_
                 )
             )
             continue
+        # Policy says only the most recent result for each required test counts.
         lab, index, lab_date = max(valid, key=lambda item: (item[2], -item[1]))
         days_prior = (procedure_date - lab_date).days
         if days_prior < 0 or days_prior > max_days:
@@ -398,6 +413,8 @@ def _testing_issues(labs: list[dict[str, Any]], procedure_date: date, procedure_
 
 
 def _anticoagulation_issue(active_anticoagulants: list[tuple[str, int]], documents: list[dict[str, Any]]) -> TriageIssue | None:
+    # Free-text documents are untrusted evidence, not instructions. The engine
+    # only extracts narrow policy signals and rejects ambiguous plan language.
     med_refs = ", ".join(f"medications[{index}]" for _, index in active_anticoagulants)
     med_names = [name.lower() for name, _ in active_anticoagulants]
     best_source = "documents"
@@ -507,6 +524,7 @@ def _is_consent_document(doc: dict[str, Any]) -> bool:
     if "consent" in doc_type:
         return True
     if "not a consent" in text:
+        # Prevent false positives from adversarial or clarifying note text.
         return False
     return "consent" in text and any(term in text for term in ("signed", "signature", "obtained", "scanned", "verified"))
 
@@ -522,6 +540,8 @@ def _first_unsigned_consent(consent_docs: list[tuple[dict[str, Any], int]]) -> t
 
 
 def _document_summary(documents: list[dict[str, Any]], limit: int = 4) -> str:
+    # Summaries ground missing-document issues without echoing unrelated patient
+    # identifiers such as MRN/name into output.
     if not documents:
         return "none"
     parts = []
@@ -563,10 +583,14 @@ def _anticoagulant_medications(medications: list[dict[str, Any]]) -> tuple[list[
 def _is_clear_anticoagulation_plan(text: str) -> bool:
     if any(term in text for term in AMBIGUOUS_PLAN_TERMS):
         return False
+    # Require both pre-op and post-op management language; a partial plan is not
+    # enough to satisfy the policy requirement for clear perioperative management.
     return any(term in text for term in PREOP_PLAN_TERMS) and any(term in text for term in POSTOP_PLAN_TERMS)
 
 
 def _latest_vital(vitals: list[dict[str, Any]], vital_type: str) -> tuple[dict[str, Any], int] | None:
+    # Acute safety rules use only the latest relevant vital; invalid dates cannot
+    # safely establish recency, so they do not satisfy the rule.
     matches = [(vital, index, _parse_datetime(vital.get("date"))) for index, vital in enumerate(vitals) if str(vital.get("type") or "").lower() == vital_type]
     valid = [(vital, index, vital_date) for vital, index, vital_date in matches if vital_date is not None]
     if not valid:
