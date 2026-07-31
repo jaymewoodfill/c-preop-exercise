@@ -154,6 +154,10 @@ Useful future tests if this becomes an API/service:
 - Authentication tests for token tampering, expiration, missing scope, and cross-tenant access.
 - Fuzz tests for date parsing and document text variants.
 
+## HIPAA and healthcare privacy
+
+See [`docs/HIPAA_PRIVACY_NOTES.md`](docs/HIPAA_PRIVACY_NOTES.md) for scoped HIPAA-aligned privacy considerations, including Minimum Necessary, audit controls, third-party disclosure, retention/disposal, and production access-control requirements.
+
 ## Known limitations
 
 - This is not a complete HIPAA/security compliance program.

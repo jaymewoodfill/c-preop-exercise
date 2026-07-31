@@ -120,6 +120,7 @@ See also:
 - [`docs/POLICY_COVERAGE.md`](docs/POLICY_COVERAGE.md) for a policy-to-code/test coverage matrix and adversarial robustness summary.
 - [`docs/DESIGN_DECISIONS.md`](docs/DESIGN_DECISIONS.md) for key tradeoffs, including why deterministic logic is used and how an LLM could be safely introduced later.
 - [`docs/PRODUCTION_HARDENING.md`](docs/PRODUCTION_HARDENING.md) for API/authZ, PII minimization, logging, and deployment hardening recommendations.
+- [`docs/HIPAA_PRIVACY_NOTES.md`](docs/HIPAA_PRIVACY_NOTES.md) for HIPAA-aligned privacy considerations such as Minimum Necessary, audit controls, third-party disclosure, retention, and access control boundaries.
 
 ## Optional Authentication Boundary
 
@@ -195,6 +196,7 @@ uv run --with 'pydantic>=2.8.0' --with 'pytest>=8.0.0' python -m pytest tests/te
 - Document classification is heuristic and intentionally scoped to the provided policy and dataset patterns.
 - No persistent users, database, encryption-at-rest, or audit logging layer is implemented because the starter is a local CLI/eval harness.
 - `auth.py` is an optional boundary demonstration, not a replacement for a production identity provider.
+- This is not a HIPAA compliance implementation; `docs/HIPAA_PRIVACY_NOTES.md` documents privacy-aware design choices and production considerations.
 - Evidence details may contain patient-like excerpts; production display/logging should be role-gated and minimized.
 - Generated reports omit full submissions, so the TUI is less useful for raw-data inspection but safer by default.
 - A perfect sample score does not prove general medical correctness beyond the stated policy.

@@ -152,6 +152,29 @@ def test_issue_explainability_contract_is_complete_and_minimized() -> None:
         assert "Private" not in issue.evidence.source
 
 
+def test_minimum_necessary_output_for_missing_lab_does_not_echo_demographics() -> None:
+    payload = secure_ready_submission()
+    payload["patient"] = {
+        "id": "patient-secret-id",
+        "mrn": "MRN-SECRET-123",
+        "name": {"given": "Private", "family": "Patient"},
+        "dob": "1970-01-01",
+        "sex": "F",
+    }
+    payload["labs"] = []
+
+    output = triage_submission(payload, model="ignored-model")
+    serialized = output.model_dump_json()
+
+    assert output.decision == "NEEDS_FOLLOW_UP"
+    assert any(issue.category == "REQUIRED_TESTING" for issue in output.issues)
+    assert "patient-secret-id" not in serialized
+    assert "MRN-SECRET-123" not in serialized
+    assert "Private" not in serialized
+    assert "Patient" not in serialized
+    assert "1970-01-01" not in serialized
+
+
 def test_security_regression_output_is_stable_across_repeated_runs() -> None:
     payload = secure_ready_submission()
     payload["documents"].append(  # type: ignore[union-attr]
