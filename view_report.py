@@ -16,6 +16,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from rich.markup import escape
 from rich.syntax import Syntax
 from textual import on
 from textual.app import App, ComposeResult
@@ -83,12 +84,12 @@ def _fmt_issues(issues: list[dict] | None) -> str:
         ev = iss.get("evidence", {})
         if ev:
             src = ev.get("source", "")
-        line = f"  {i}. [{cat}] {desc}"
+        line = f"  {i}. [{escape(str(cat))}] {escape(str(desc))}"
         if src:
-            line += f"\n     source: {src}"
+            line += f"\n     source: {escape(str(src))}"
         details = ev.get("details", "") if ev else ""
         if details:
-            line += f"\n     details: {details}"
+            line += f"\n     details: {escape(str(details))}"
         lines.append(line)
     return "\n".join(lines)
 
@@ -176,11 +177,11 @@ class EvalReportApp(App):
         ts = self.report.get("generated_at", "")[:19]
         mode = self.report.get("mode", "eval")
         text = (
-            f" Score: [bold]{score_val}%[/bold]  |  Records: {n_records}"
-            f"  |  Mode: {mode}  |  Generated: {ts}"
+            f" Score: [bold]{escape(str(score_val))}%[/bold]  |  Records: {n_records}"
+            f"  |  Mode: {escape(str(mode))}  |  Generated: {escape(str(ts))}"
         )
         if self._active_filter is not None:
-            text += f"  |  Filter: [bold]{self._active_filter}[/bold]"
+            text += f"  |  Filter: [bold]{escape(str(self._active_filter))}[/bold]"
         return text
 
     def _build_header_bar(self) -> Static:
@@ -297,7 +298,7 @@ class EvalReportApp(App):
         metrics = rec.get("metrics", {})
 
         lines: list[str] = []
-        lines.append(f"[bold]Record {idx}[/bold] — {case_id}")
+        lines.append(f"[bold]Record {escape(str(idx))}[/bold] — {escape(str(case_id))}")
         lines.append(f"Score: {score:.1f}%\n")
 
         # Metrics
@@ -308,17 +309,17 @@ class EvalReportApp(App):
             lines.append(f"  {m}: {mark}")
 
         if baseline_err:
-            lines.append(f"\n[red]Baseline error:[/red] {baseline_err}")
+            lines.append(f"\n[red]Baseline error:[/red] {escape(str(baseline_err))}")
         if parse_err:
-            lines.append(f"\n[red]Parse error:[/red] {parse_err}")
+            lines.append(f"\n[red]Parse error:[/red] {escape(str(parse_err))}")
 
         # Side-by-side: decision
         lines.append("\n[bold]Decision:[/bold]")
         o_dec = oracle.get("decision", "?")
         a_dec = actual.get("decision", "?")
         match = "✓" if o_dec == a_dec else "✗"
-        lines.append(f"  Oracle:  {o_dec}")
-        lines.append(f"  Actual:  {a_dec}  {match}")
+        lines.append(f"  Oracle:  {escape(str(o_dec))}")
+        lines.append(f"  Actual:  {escape(str(a_dec))}  {match}")
 
         # Issues comparison
         lines.append("\n[bold]Oracle issues:[/bold]")
@@ -329,10 +330,10 @@ class EvalReportApp(App):
 
         # Explanations
         lines.append("\n[bold]Oracle explanation:[/bold]")
-        lines.append(f"  {oracle.get('explanation', '—')}")
+        lines.append(f"  {escape(str(oracle.get('explanation', '—')))}")
 
         lines.append("\n[bold]Actual explanation:[/bold]")
-        lines.append(f"  {actual.get('explanation', '—')}")
+        lines.append(f"  {escape(str(actual.get('explanation', '—')))}")
 
         return "\n".join(lines)
 

@@ -31,7 +31,7 @@ Confirm `uv` is installed.
 uv --version
 ```
 
-This implementation is deterministic and does not call an LLM at runtime, so no OpenAI API key is required for the baseline, scoring, or determinism workflows.
+This implementation is deterministic and does not call an LLM at runtime, so no OpenAI API key is required for the baseline, scoring, or determinism workflows. `make evals` is local-only by default; `make openai-evals` is an explicit opt-in path if you want to create an OpenAI Eval run.
 
 ## Architecture
 
@@ -54,10 +54,16 @@ flowchart LR
 make baseline
 ```
 
-3. Run eval scoring:
+3. Run local eval scoring:
 
 ```bash
 make evals
+```
+
+Optional OpenAI Eval run, if you intentionally want one:
+
+```bash
+make openai-evals
 ```
 
 4. Run determinism check:
@@ -78,7 +84,7 @@ make score
 make report
 ```
 
-This opens a terminal UI (`view_report.py`) that shows per-case results side-by-side with oracle expectations. You can browse records, see metric pass/fail status, and inspect submission data. Press `f` on a metric row to filter the case list to failures. Press `q` to quit.
+This opens a terminal UI (`view_report.py`) that shows per-case results side-by-side with oracle expectations. Full submissions are intentionally omitted from generated reports to reduce PHI/PII exposure. Press `f` on a metric row to filter the case list to failures. Press `q` to quit.
 
 ## Implementation Approach
 
@@ -92,15 +98,21 @@ The engine:
 - Uses stable issue categories and evidence paths compatible with the eval harness.
 - Fails closed for missing/unknown data needed to evaluate a rule.
 - Treats clinical note text as untrusted input; note text is used only as evidence, never as instructions.
+- Requires consent/H&P document types instead of trusting bare keywords in arbitrary note text.
+- Rejects fake/cancelled lab codes such as `NOT-CBC` and non-final lab statuses.
+- Ignores future-dated or non-finite vitals when determining current acute safety status.
 - Requires clear anticoagulation plans and rejects vague/negated language such as pending recommendations or “no clear hold/resume guidance.”
+- Produces generated baseline/eval artifacts without duplicating full patient submissions.
 
 Security/robustness choices influenced by AI application security experience:
 
-- No runtime API calls or PHI-like data egress.
+- No runtime API calls or PHI-like data egress by default.
 - No prompt-injection exposure in the core decision path.
 - No dynamic code execution or shelling out from patient input.
 - Deterministic serialization via Pydantic models.
-- Minimal dependency surface: existing starter dependencies only.
+- Safe output/report path handling to avoid symlink overwrite and path traversal.
+- Bounded JSONL input size and determinism replay count to reduce resource-exhaustion risk.
+- Minimal dependency surface: existing starter dependencies only for the core workflows.
 
 See also:
 
@@ -129,12 +141,19 @@ Run focused policy boundary tests:
 make policy-test
 ```
 
+Run focused pentest regression tests:
+
+```bash
+make pentest-test
+```
+
 ## Known Limitations
 
 - This is not a clinical safety certification or medical guideline engine; it implements only the supplied assignment policy.
 - Document classification is heuristic and intentionally scoped to the provided policy and dataset patterns.
 - No auth, tenant isolation, database, encryption-at-rest, or audit logging layer is implemented because the starter is a local CLI/eval harness.
 - Evidence details may contain patient-like excerpts; production display/logging should be role-gated and minimized.
+- Generated reports omit full submissions, so the TUI is less useful for raw-data inspection but safer by default.
 - A perfect sample score does not prove general medical correctness beyond the stated policy.
 
 ## Outputs

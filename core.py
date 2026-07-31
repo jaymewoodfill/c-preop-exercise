@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import math
+import re
 from datetime import date, datetime, timezone
 from typing import Any, Literal
 
@@ -240,6 +242,14 @@ AMBIGUOUS_PLAN_TERMS = (
     "to be determined",
     "tbd",
     "unclear",
+    "no guidance",
+    "no instructions",
+    "not documented",
+    "not agreed",
+    "could not agree",
+    "cannot agree",
+    "unable to agree",
+    "not finalized",
 )
 
 PREOP_PLAN_TERMS = ("hold", "stop", "pause", "withhold", "last dose", "do not take")
@@ -268,6 +278,8 @@ def triage_submission(
     procedure_date_raw = procedure.get("procedure_date")
     procedure_date = _parse_date(procedure_date_raw)
     procedure_risk = procedure.get("procedure_risk")
+    metadata = _as_dict(payload.get("metadata"))
+    review_datetime = _parse_datetime(metadata.get("submission_received_at"))
 
     # Structured procedure date is treated as authoritative; document text may
     # mention target dates, but inferring from free text would hide missing data.
@@ -283,6 +295,7 @@ def triage_submission(
     labs = _as_list(payload.get("labs"))
     vitals = _as_list(payload.get("vitals"))
     medications = _as_list(payload.get("medications"))
+    effective_procedure_risk = _effective_procedure_risk(procedure_risk, procedure, documents)
 
     if procedure_date is not None:
         issues.extend(_documentation_issues(documents, procedure_date))
@@ -291,8 +304,8 @@ def triage_submission(
         # presence issues are still useful operational blockers.
         issues.extend(_documentation_presence_issues(documents))
 
-    if procedure_date is not None and procedure_risk in {"LOW", "MODERATE", "HIGH"}:
-        issues.extend(_testing_issues(labs, procedure_date, procedure_risk))
+    if procedure_date is not None and effective_procedure_risk in {"LOW", "MODERATE", "HIGH"}:
+        issues.extend(_testing_issues(labs, procedure_date, effective_procedure_risk))
 
     anticoagulants, unknown_anticoagulants = _anticoagulant_medications(medications)
     for med_name, index in unknown_anticoagulants:
@@ -309,7 +322,7 @@ def triage_submission(
         if anticoag_issue is not None:
             issues.append(anticoag_issue)
 
-    issues.extend(_vital_issues(vitals))
+    issues.extend(_vital_issues(vitals, review_datetime))
 
     # Safety exclusions dominate scheduling readiness, while retaining other
     # follow-up issues in the response for operational visibility.
@@ -435,10 +448,10 @@ def _anticoagulation_issue(active_anticoagulants: list[tuple[str, int]], documen
     return _issue("ANTICOAGULATION_MANAGEMENT", "Missing perioperative anticoagulation plan", best_source, details)
 
 
-def _vital_issues(vitals: list[dict[str, Any]]) -> list[TriageIssue]:
+def _vital_issues(vitals: list[dict[str, Any]], review_datetime: datetime | None) -> list[TriageIssue]:
     issues: list[TriageIssue] = []
-    latest_bp = _latest_vital(vitals, "blood_pressure")
-    latest_temp = _latest_vital(vitals, "temperature")
+    latest_bp = _latest_vital(vitals, "blood_pressure", review_datetime)
+    latest_temp = _latest_vital(vitals, "temperature", review_datetime)
 
     if latest_bp is None:
         issues.append(_issue("MISSING_REQUIRED_DATA", "Missing latest blood pressure", "vitals", "No blood_pressure vital with valid date found"))
@@ -511,22 +524,30 @@ def _document_text(doc: dict[str, Any]) -> str:
 
 
 def _is_hp_document(doc: dict[str, Any]) -> bool:
-    doc_type = str(doc.get("type") or "").lower().replace("_", " ")
-    text = str(doc.get("text") or "").lower().replace("_", " ")
-    type_terms = ("history and physical", "history & physical", "physical examination", "h&p", "h and p", "hist & phys", "hx & physical")
-    text_terms = ("history and physical", "h&p note", "h&p retained", "history: pre-op evaluation complete")
-    return any(term in doc_type for term in type_terms) or any(term in text for term in text_terms)
+    doc_type = _normalized_text(doc.get("type"))
+    # Require the document type to look like an H&P. Bare keywords in arbitrary
+    # note text are too easy to forge and should not satisfy documentation gates.
+    type_terms = (
+        "history and physical",
+        "history & physical",
+        "physical examination",
+        "h&p",
+        "h and p",
+        "hist & phys",
+        "hx & physical",
+    )
+    return any(term in doc_type for term in type_terms)
 
 
 def _is_consent_document(doc: dict[str, Any]) -> bool:
-    doc_type = str(doc.get("type") or "").lower().replace("_", " ")
-    text = str(doc.get("text") or "").lower().replace("_", " ")
-    if "consent" in doc_type:
-        return True
+    doc_type = _normalized_text(doc.get("type"))
+    text = _normalized_text(doc.get("text"))
     if "not a consent" in text:
         # Prevent false positives from adversarial or clarifying note text.
         return False
-    return "consent" in text and any(term in text for term in ("signed", "signature", "obtained", "scanned", "verified"))
+    # Require a consent-like document type; arbitrary notes with "signed consent"
+    # in the body are treated as evidence at most, not as the required document.
+    return "consent" in doc_type
 
 
 def _first_unsigned_consent(consent_docs: list[tuple[dict[str, Any], int]]) -> tuple[dict[str, Any], int] | None:
@@ -560,10 +581,19 @@ def _lab_summary(labs: list[dict[str, Any]], limit: int = 4) -> str:
 
 
 def _is_lab(lab: dict[str, Any], code: str) -> bool:
-    text = f"{lab.get('code') or ''} {lab.get('display') or ''}".upper()
+    status = _normalized_text(lab.get("status"))
+    if status and status not in {"final", "corrected", "amended"}:
+        return False
+
+    lab_code = str(lab.get("code") or "").upper().strip()
+    display = _normalized_text(lab.get("display"))
+    if any(term in f"{lab_code} {display}" for term in ("CANCEL", "NOT-", "FAKE", "VOID", "ERRONEOUS")):
+        return False
+
+    tokens = {token for token in re.split(r"[^A-Z0-9]+", lab_code) if token}
     if code == "CBC":
-        return "CBC" in text or "COMPLETE BLOOD COUNT" in text
-    return "CMP" in text or "COMPREHENSIVE METABOLIC PANEL" in text
+        return "CBC" in tokens or "complete blood count" in display
+    return "CMP" in tokens or "comprehensive metabolic panel" in display
 
 
 def _anticoagulant_medications(medications: list[dict[str, Any]]) -> tuple[list[tuple[str, int]], list[tuple[str, int]]]:
@@ -581,6 +611,7 @@ def _anticoagulant_medications(medications: list[dict[str, Any]]) -> tuple[list[
 
 
 def _is_clear_anticoagulation_plan(text: str) -> bool:
+    text = _normalized_text(text)
     if any(term in text for term in AMBIGUOUS_PLAN_TERMS):
         return False
     # Require both pre-op and post-op management language; a partial plan is not
@@ -588,11 +619,23 @@ def _is_clear_anticoagulation_plan(text: str) -> bool:
     return any(term in text for term in PREOP_PLAN_TERMS) and any(term in text for term in POSTOP_PLAN_TERMS)
 
 
-def _latest_vital(vitals: list[dict[str, Any]], vital_type: str) -> tuple[dict[str, Any], int] | None:
-    # Acute safety rules use only the latest relevant vital; invalid dates cannot
-    # safely establish recency, so they do not satisfy the rule.
-    matches = [(vital, index, _parse_datetime(vital.get("date"))) for index, vital in enumerate(vitals) if str(vital.get("type") or "").lower() == vital_type]
-    valid = [(vital, index, vital_date) for vital, index, vital_date in matches if vital_date is not None]
+def _latest_vital(vitals: list[dict[str, Any]], vital_type: str, review_datetime: datetime | None) -> tuple[dict[str, Any], int] | None:
+    # Acute safety rules use only the latest relevant vital. Future-dated rows and
+    # non-finite values cannot safely establish current review state.
+    valid: list[tuple[dict[str, Any], int, datetime]] = []
+    for index, vital in enumerate(vitals):
+        if str(vital.get("type") or "").lower() != vital_type:
+            continue
+        vital_date = _parse_datetime(vital.get("date"))
+        if vital_date is None:
+            continue
+        if review_datetime is not None and vital_date > review_datetime:
+            continue
+        if vital_type == "blood_pressure" and (_number(vital.get("systolic")) is None or _number(vital.get("diastolic")) is None):
+            continue
+        if vital_type == "temperature" and _number(vital.get("value_f")) is None:
+            continue
+        valid.append((vital, index, vital_date))
     if not valid:
         return None
     vital, index, _ = max(valid, key=lambda item: (item[2], -item[1]))
@@ -603,9 +646,10 @@ def _number(value: Any) -> float | None:
     if isinstance(value, bool) or value is None:
         return None
     try:
-        return float(value)
+        number = float(value)
     except (TypeError, ValueError):
         return None
+    return number if math.isfinite(number) else None
 
 
 def _format_number(value: Any) -> str:
@@ -613,6 +657,23 @@ def _format_number(value: Any) -> str:
     if number is None:
         return str(value)
     return str(int(number)) if number.is_integer() else str(number)
+
+
+def _normalized_text(value: Any) -> str:
+    return " ".join(str(value or "").lower().replace("_", " ").split())
+
+
+def _effective_procedure_risk(procedure_risk: str | None, procedure: dict[str, Any], documents: list[dict[str, Any]]) -> str | None:
+    risk = procedure_risk
+    risk_text = " ".join(
+        [_normalized_text(procedure.get("procedure_type"))]
+        + [_normalized_text(doc.get("type")) + " " + _normalized_text(doc.get("text")) for doc in documents]
+    )
+    # If any submitted materials describe the case as high risk, conservatively
+    # apply the stricter HIGH testing gate even if the structured field is lower.
+    if re.search(r"\bhigh[- ]risk\b|\bprocedure risk\s*[:=]\s*high\b|\brisk level\s*[:=]\s*high\b", risk_text):
+        return "HIGH"
+    return risk
 
 
 def _excerpt(value: Any, limit: int = 180) -> str:

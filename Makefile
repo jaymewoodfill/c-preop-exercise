@@ -4,7 +4,7 @@ REPORT ?= data/eval_report.json
 DETERMINISM_REPORT ?= data/determinism_report.json
 MODEL ?= gpt-4.1-mini
 
-.PHONY: baseline evals determinism score report test security-test policy-test all clean
+.PHONY: baseline evals openai-evals determinism score report test security-test policy-test pentest-test all clean
 
 baseline:
 	uv run run_baseline.py \
@@ -14,6 +14,13 @@ baseline:
 
 evals:
 	uv run run_evals.py \
+		--input $(INPUT) \
+		--outputs $(OUTPUT) \
+		--report $(REPORT)
+
+openai-evals:
+	uv run --with 'openai>=2.0.0' run_evals.py \
+		--openai-eval \
 		--input $(INPUT) \
 		--outputs $(OUTPUT) \
 		--report $(REPORT)
@@ -33,9 +40,10 @@ report:
 
 test:
 	uv run \
-		--with 'openai>=2.0.0' \
 		--with 'pydantic>=2.8.0' \
 		--with 'pytest>=8.0.0' \
+		--with 'rich>=13.0.0' \
+		--with 'textual>=1.0.0' \
 		python -m pytest tests
 
 security-test:
@@ -49,6 +57,14 @@ policy-test:
 		--with 'pydantic>=2.8.0' \
 		--with 'pytest>=8.0.0' \
 		python -m pytest tests/test_policy_boundaries.py
+
+pentest-test:
+	uv run \
+		--with 'pydantic>=2.8.0' \
+		--with 'pytest>=8.0.0' \
+		--with 'rich>=13.0.0' \
+		--with 'textual>=1.0.0' \
+		python -m pytest tests/test_pentest_regression.py
 
 all: baseline evals determinism score
 

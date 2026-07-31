@@ -2,25 +2,23 @@
 # /// script
 # requires-python = ">=3.11"
 # dependencies = [
-#   "openai>=2.0.0",
 #   "pydantic>=2.8.0",
 # ]
 # ///
 
-"""Run local OpenAI Evals scoring and determinism checks for baseline triage outputs."""
+"""Run local eval scoring and determinism checks for baseline triage outputs."""
 
 from __future__ import annotations
 
 import argparse
 from collections import Counter
 from datetime import UTC, datetime
+import hashlib
 import json
 from pathlib import Path
 import re
 import time
 from typing import Any
-
-from openai import OpenAI
 
 from core import (
     PreparedPatientCase,
@@ -34,6 +32,10 @@ ROOT = Path(__file__).resolve().parent
 DEFAULT_MODEL = "gpt-4.1-mini"
 TERMINAL_RUN_STATUSES = {"completed", "failed", "canceled"}
 PRIMARY_SCORE_NAME = "aggregate_local_score_pct"
+MAX_INPUT_BYTES = 20 * 1024 * 1024
+MAX_LINE_BYTES = 2 * 1024 * 1024
+MAX_RECORDS = 10_000
+MAX_DETERMINISM_RUNS = 100
 
 # issues_value_grounding is worth half a point — it rewards structured evidence
 # but is harder to satisfy than the other binary metrics.
@@ -65,7 +67,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--model",
         default=DEFAULT_MODEL,
-        help="Model id used for determinism mode",
+        help="Model id placeholder used for determinism mode CLI compatibility",
     )
     parser.add_argument(
         "--poll-interval-seconds",
@@ -96,13 +98,40 @@ def parse_args() -> argparse.Namespace:
         default=0,
         help="Record index to use for determinism mode",
     )
+    parser.add_argument(
+        "--openai-eval",
+        action="store_true",
+        help="Opt in to creating an OpenAI Eval run. Default eval mode is local-only.",
+    )
     return parser.parse_args()
 
 
+def _safe_output_path(raw_path: str) -> Path:
+    path = Path(raw_path)
+    resolved = path.resolve()
+    if not resolved.is_relative_to(ROOT):
+        raise ValueError(f"Report path must stay inside repository: {raw_path}")
+    if path.exists() and path.is_symlink():
+        raise ValueError(f"Refusing to overwrite symlink report path: {raw_path}")
+    return resolved
+
+
+def _submission_fingerprint(submission: dict[str, Any]) -> str:
+    canonical = json.dumps(submission, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
 def load_jsonl(path: Path) -> list[dict[str, object]]:
+    if path.stat().st_size > MAX_INPUT_BYTES:
+        raise ValueError(f"JSONL file too large: {path}")
+
     rows: list[dict[str, object]] = []
     with path.open("r", encoding="utf-8") as handle:
-        for line in handle:
+        for idx, line in enumerate(handle):
+            if len(line.encode("utf-8")) > MAX_LINE_BYTES:
+                raise ValueError(f"JSONL row {idx} exceeds maximum line size")
+            if idx >= MAX_RECORDS:
+                raise ValueError(f"JSONL exceeds maximum record count ({MAX_RECORDS})")
             line = line.strip()
             if not line:
                 continue
@@ -416,6 +445,14 @@ def _build_eval_items(
 
         baseline_row = outputs_by_index.get(idx, {})
         output_payload, output_error = _extract_output_payload(baseline_row)
+        expected_fingerprint = _submission_fingerprint(submission)
+        if baseline_row:
+            if baseline_row.get("case_id") != case.case_id:
+                output_payload = None
+                output_error = f"case_id mismatch: expected {case.case_id}, got {baseline_row.get('case_id')}"
+            elif baseline_row.get("submission_fingerprint") not in (None, expected_fingerprint):
+                output_payload = None
+                output_error = "submission fingerprint mismatch"
 
         local = _local_metrics_for_row(
             submission=submission,
@@ -445,7 +482,6 @@ def _build_eval_items(
             {
                 "record_index": idx,
                 "case_id": case.case_id,
-                "submission": submission,
                 "baseline_error": output_error,
                 "oracle": local["oracle"],
                 "parsed_output": local["parsed_output"],
@@ -458,7 +494,7 @@ def _build_eval_items(
     return content_rows, local_rows
 
 
-def _create_eval(client: OpenAI) -> Any:
+def _create_eval(client: Any) -> Any:
     timestamp = datetime.now(tz=UTC).strftime("%Y%m%d_%H%M%S")
     return client.evals.create(
         name=f"preop-triage-eval-{timestamp}",
@@ -531,7 +567,7 @@ def _create_eval(client: OpenAI) -> Any:
 
 
 def _create_eval_run(
-    client: OpenAI, eval_id: str, content_rows: list[dict[str, object]]
+    client: Any, eval_id: str, content_rows: list[dict[str, object]]
 ) -> Any:
     timestamp = datetime.now(tz=UTC).strftime("%Y%m%d_%H%M%S")
     return client.evals.runs.create(
@@ -551,7 +587,7 @@ def _create_eval_run(
 
 
 def _wait_for_run_completion(
-    client: OpenAI,
+    client: Any,
     *,
     eval_id: str,
     run_id: str,
@@ -634,25 +670,6 @@ def run_eval_mode(args: argparse.Namespace) -> dict[str, object]:
 
     content_rows, local_rows = _build_eval_items(cases, outputs_by_index)
 
-    client = OpenAI()
-    eval_obj = _create_eval(client)
-    run_obj = _create_eval_run(client, eval_obj.id, content_rows)
-
-    final_run = _wait_for_run_completion(
-        client,
-        eval_id=eval_obj.id,
-        run_id=run_obj.id,
-        poll_interval_seconds=args.poll_interval_seconds,
-        timeout_seconds=args.timeout_seconds,
-    )
-
-    output_items_page = client.evals.runs.output_items.list(
-        run_id=run_obj.id,
-        eval_id=eval_obj.id,
-        limit=max(100, len(content_rows)),
-    )
-    output_items = list(output_items_page.data)
-
     local_metrics_summary = _summarize_local_rows(local_rows)
     primary_score_pct = float(local_metrics_summary.get(PRIMARY_SCORE_NAME, 0.0))
 
@@ -664,19 +681,53 @@ def run_eval_mode(args: argparse.Namespace) -> dict[str, object]:
             "value_pct": primary_score_pct,
             "goal": "maximize",
         },
-        "eval_id": eval_obj.id,
-        "run_id": run_obj.id,
-        "run_status": final_run.status,
-        "run_report_url": final_run.report_url,
-        "run_result_counts": final_run.result_counts.model_dump(),
-        "run_per_testing_criteria_results": [
-            result.model_dump() for result in final_run.per_testing_criteria_results
-        ],
-        "criteria_summary_from_output_items": _summarize_output_items(output_items),
+        "eval_id": None,
+        "run_id": None,
+        "run_status": "local_only",
+        "run_report_url": None,
+        "run_result_counts": {},
+        "run_per_testing_criteria_results": [],
+        "criteria_summary_from_output_items": {},
         "local_metrics_summary": local_metrics_summary,
         "records": local_rows,
-        "output_items": [item.model_dump() for item in output_items],
+        "output_items": [],
     }
+
+    if args.openai_eval:
+        from openai import OpenAI
+
+        client = OpenAI()
+        eval_obj = _create_eval(client)
+        run_obj = _create_eval_run(client, eval_obj.id, content_rows)
+
+        final_run = _wait_for_run_completion(
+            client,
+            eval_id=eval_obj.id,
+            run_id=run_obj.id,
+            poll_interval_seconds=args.poll_interval_seconds,
+            timeout_seconds=args.timeout_seconds,
+        )
+
+        output_items_page = client.evals.runs.output_items.list(
+            run_id=run_obj.id,
+            eval_id=eval_obj.id,
+            limit=max(100, len(content_rows)),
+        )
+        output_items = list(output_items_page.data)
+        report.update(
+            {
+                "eval_id": eval_obj.id,
+                "run_id": run_obj.id,
+                "run_status": final_run.status,
+                "run_report_url": final_run.report_url,
+                "run_result_counts": final_run.result_counts.model_dump(),
+                "run_per_testing_criteria_results": [
+                    result.model_dump() for result in final_run.per_testing_criteria_results
+                ],
+                "criteria_summary_from_output_items": _summarize_output_items(output_items),
+                "output_items": [item.model_dump() for item in output_items],
+            }
+        )
 
     return report
 
@@ -763,13 +814,15 @@ def main() -> None:
 
     if args.runs <= 0:
         raise ValueError("--runs must be > 0")
+    if args.runs > MAX_DETERMINISM_RUNS:
+        raise ValueError(f"--runs must be <= {MAX_DETERMINISM_RUNS}")
 
     if args.determinism:
         report = run_determinism_mode(args)
     else:
         report = run_eval_mode(args)
 
-    report_path = Path(args.report)
+    report_path = _safe_output_path(args.report)
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(
         json.dumps(report, indent=2, ensure_ascii=True), encoding="utf-8"
