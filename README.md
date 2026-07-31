@@ -90,6 +90,8 @@ Security/robustness choices influenced by AI application security experience:
 - Deterministic serialization via Pydantic models.
 - Minimal dependency surface: existing starter dependencies only.
 
+See [`SECURITY.md`](SECURITY.md) for OWASP LLM Top 10 and OWASP Web/Application Top 10 mapping, threat model, and security-focused test notes.
+
 ## Tests
 
 Run the unit tests with:

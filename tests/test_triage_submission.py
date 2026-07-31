@@ -181,6 +181,25 @@ def test_clinical_note_prompt_injection_does_not_control_decision() -> None:
     assert output.issues[-1].description == "Signed surgical consent missing"
 
 
+def test_unrelated_patient_identifiers_are_not_copied_to_output() -> None:
+    payload = ready_submission()
+    payload["patient"] = {
+        "id": "patient-secret-id",
+        "mrn": "MRN-SECRET-123",
+        "name": {"given": "Private", "family": "Patient"},
+    }
+    payload["documents"] = []
+
+    output = triage_submission(payload, model="ignored-model")
+    serialized = output.model_dump_json()
+
+    assert output.decision == "NEEDS_FOLLOW_UP"
+    assert "patient-secret-id" not in serialized
+    assert "MRN-SECRET-123" not in serialized
+    assert "Private" not in serialized
+    assert "Patient" not in serialized
+
+
 def test_output_is_deterministic() -> None:
     payload = ready_submission()
 
