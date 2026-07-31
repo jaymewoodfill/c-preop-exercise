@@ -129,6 +129,29 @@ def test_patient_identifiers_are_not_echoed_when_not_evidence() -> None:
     assert "1970-01-01" not in serialized
 
 
+def test_issue_explainability_contract_is_complete_and_minimized() -> None:
+    payload = secure_ready_submission()
+    payload["patient"] = {
+        "id": "patient-secret-id",
+        "mrn": "MRN-SECRET-123",
+        "name": {"given": "Private", "family": "Patient"},
+    }
+    payload["procedure"]["procedure_date"] = None  # type: ignore[index]
+    payload["documents"] = []
+
+    output = triage_submission(payload, model="ignored-model")
+
+    assert output.decision == "NEEDS_FOLLOW_UP"
+    for issue in output.issues:
+        assert issue.category
+        assert issue.description
+        assert issue.evidence.source
+        assert issue.evidence.details
+        assert "patient-secret-id" not in issue.evidence.source
+        assert "MRN-SECRET-123" not in issue.evidence.source
+        assert "Private" not in issue.evidence.source
+
+
 def test_security_regression_output_is_stable_across_repeated_runs() -> None:
     payload = secure_ready_submission()
     payload["documents"].append(  # type: ignore[union-attr]

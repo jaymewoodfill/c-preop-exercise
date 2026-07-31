@@ -33,6 +33,18 @@ uv --version
 
 This implementation is deterministic and does not call an LLM at runtime, so no OpenAI API key is required for the baseline, scoring, or determinism workflows.
 
+## Architecture
+
+```mermaid
+flowchart LR
+  A[Patient submission JSON] --> B[Pydantic schema validation]
+  B --> C[Deterministic policy engine]
+  C --> D[Evidence builder]
+  D --> E[TriageOutput JSON]
+  C --> F[Policy boundary tests]
+  C --> G[Security regression tests]
+```
+
 ## Recommended Workflow
 
 1. Review `triage_submission` in `core.py`.
@@ -94,14 +106,36 @@ See also:
 
 - [`SECURITY.md`](SECURITY.md) for OWASP LLM Top 10 and OWASP Web/Application Top 10 mapping, threat model, PII/PHI considerations, and security-focused test notes.
 - [`docs/POLICY_COVERAGE.md`](docs/POLICY_COVERAGE.md) for a policy-to-code/test coverage matrix and adversarial robustness summary.
+- [`docs/DESIGN_DECISIONS.md`](docs/DESIGN_DECISIONS.md) for key tradeoffs, including why deterministic logic is used and how an LLM could be safely introduced later.
+- [`docs/PRODUCTION_HARDENING.md`](docs/PRODUCTION_HARDENING.md) for API/authZ, PII minimization, logging, and deployment hardening recommendations.
 
 ## Tests
 
-Run the unit tests with:
+Run all tests with:
 
 ```bash
 make test
 ```
+
+Run focused security regression tests:
+
+```bash
+make security-test
+```
+
+Run focused policy boundary tests:
+
+```bash
+make policy-test
+```
+
+## Known Limitations
+
+- This is not a clinical safety certification or medical guideline engine; it implements only the supplied assignment policy.
+- Document classification is heuristic and intentionally scoped to the provided policy and dataset patterns.
+- No auth, tenant isolation, database, encryption-at-rest, or audit logging layer is implemented because the starter is a local CLI/eval harness.
+- Evidence details may contain patient-like excerpts; production display/logging should be role-gated and minimized.
+- A perfect sample score does not prove general medical correctness beyond the stated policy.
 
 ## Outputs
 
