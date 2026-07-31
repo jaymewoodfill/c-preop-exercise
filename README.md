@@ -49,7 +49,21 @@ flowchart LR
 
 ## Recommended Workflow
 
-1. Review `triage_submission` via `core.py` compatibility export and implementation in `rules.py`.
+Run the full local validation gate with one command:
+
+```bash
+./validate.sh
+```
+
+or:
+
+```bash
+make validate
+```
+
+Then review `triage_submission` via `core.py` compatibility export and implementation in `rules.py`.
+
+Manual workflow:
 2. Run baseline outputs:
 
 ```bash
@@ -114,11 +128,12 @@ Security/robustness choices influenced by AI application security experience:
 - Deterministic serialization via Pydantic models.
 - Safe output/report path handling to avoid symlink overwrite and path traversal.
 - Bounded JSONL input size and determinism replay count to reduce resource-exhaustion risk.
-- Minimal dependency surface: existing starter dependencies only for the core workflows.
+- Minimal core runtime dependency surface: Pydantic only for the deterministic triage/eval path; dev/report/OpenAI dependencies are pinned separately.
 - Dependency versions are pinned in `pyproject.toml` and locked in `uv.lock`.
 
 See also:
 
+- [`SUBMISSION.md`](SUBMISSION.md) for a concise reviewer-facing summary, run commands, validation results, security highlights, and known limitations.
 - [`SECURITY.md`](SECURITY.md) for OWASP LLM Top 10 and OWASP Web/Application Top 10 mapping, threat model, PII/PHI considerations, and security-focused test notes.
 - [`docs/POLICY_COVERAGE.md`](docs/POLICY_COVERAGE.md) for a policy-to-code/test coverage matrix and adversarial robustness summary.
 - [`docs/DESIGN_DECISIONS.md`](docs/DESIGN_DECISIONS.md) for key tradeoffs, including why deterministic logic is used and how an LLM could be safely introduced later.
@@ -167,6 +182,15 @@ Run all tests with:
 
 ```bash
 make test
+```
+
+If `make` is unavailable, run `./validate.sh` or the equivalent direct commands:
+
+```bash
+uv run --extra dev python -m pytest tests
+uv run run_baseline.py --input data/patients_sample_50.jsonl --output data/baseline_outputs.jsonl --model unused
+uv run run_evals.py --input data/patients_sample_50.jsonl --outputs data/baseline_outputs.jsonl --report data/eval_report.json
+uv run run_evals.py --determinism --input data/patients_sample_50.jsonl --model unused --report data/determinism_report.json --runs 10 --record-index 0
 ```
 
 Run focused security regression tests:

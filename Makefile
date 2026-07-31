@@ -4,7 +4,7 @@ REPORT ?= data/eval_report.json
 DETERMINISM_REPORT ?= data/determinism_report.json
 MODEL ?= gpt-4.1-mini
 
-.PHONY: baseline evals openai-evals determinism score report lint test security-test policy-test pentest-test auth-test all clean
+.PHONY: baseline evals openai-evals determinism score report lint test security-test policy-test pentest-test auth-test validate all clean
 
 baseline:
 	uv run run_baseline.py \
@@ -55,6 +55,9 @@ pentest-test:
 
 auth-test:
 	uv run --extra dev python -m pytest tests/test_auth.py
+
+validate:
+	./validate.sh
 
 all: baseline evals determinism score
 
