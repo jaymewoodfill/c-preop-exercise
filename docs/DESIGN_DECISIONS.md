@@ -43,17 +43,24 @@ Security controls I would require:
 - Keep the deterministic rule engine as the final decision-maker.
 - Avoid sending patient-like data externally unless product/privacy requirements explicitly allow it.
 
-## 3. No web service or auth layer in this submission
+## 3. Optional auth boundary, no web service
 
-The assignment asks for `triage_submission(...)` and provides a local eval harness. I intentionally did not add a web API, database, auth layer, or tenant model.
+The assignment asks for `triage_submission(...)` and provides a local eval harness. I did not add a web API, database, persistent users, or production identity layer.
+
+`auth.py` provides a small optional boundary demonstration for service deployments:
+
+- verifies signed bearer tokens,
+- checks expiration,
+- enforces `triage:evaluate` scope,
+- enforces tenant/account match before calling the triage engine.
 
 Reasoning:
 
-- Those would be important in production, but would add noise to the take-home.
-- Access control cannot be correctly implemented without a trusted identity/session boundary.
-- A fake auth layer would create complexity without improving the assignment output.
+- Real access control requires a trusted identity/session boundary and server-side object lookup.
+- A full API/auth service would add noise to the take-home.
+- A lightweight boundary demonstrates placement and failure modes without making production-readiness claims.
 
-Instead, `SECURITY.md` and `docs/POLICY_COVERAGE.md` document where authN/authZ and tenant isolation belong if this engine is deployed behind an API.
+`SECURITY.md`, `docs/PRODUCTION_HARDENING.md`, and `docs/HIPAA_PRIVACY_NOTES.md` document what a production authN/authZ layer would still require.
 
 ## 4. Evidence excerpts are included only where required
 
@@ -91,14 +98,29 @@ The engine still returns follow-up issues when `NOT_CLEARED` is present, because
 
 ## 7. Dependency minimization
 
-No new runtime dependency was added beyond the starter stack. This reduces supply-chain surface and keeps reviewer setup simple.
+No new core runtime dependency was added beyond Pydantic. Dependency versions are pinned in `pyproject.toml` and locked in `uv.lock` to make CI/reviewer runs reproducible.
 
-## 8. Testing strategy
+## 8. Module layout
+
+The starter expected `core.py`, so `core.py` remains as a compatibility module that re-exports the public API. Implementation details are split by responsibility:
+
+- `models.py` — Pydantic schemas and type aliases.
+- `rules.py` — deterministic policy engine and rule-specific helpers.
+- `evidence.py` — issue/evidence/explanation builders.
+- `parsing.py` — date, number, text normalization, and excerpt helpers.
+- `llm_prompt.py` — legacy prompt helpers isolated from the default deterministic path.
+- `auth.py` — optional service-boundary authentication/authorization wrapper.
+
+This keeps the take-home compatible with the harness while avoiding an ever-growing `core.py`.
+
+## 9. Testing strategy
 
 The tests are split by intent:
 
 - `tests/test_triage_submission.py` covers core policy behavior.
 - `tests/test_security_regression.py` covers adversarial/security/privacy behavior.
 - `tests/test_policy_boundaries.py` covers date and threshold boundaries.
+- `tests/test_pentest_regression.py` covers pentest-derived regressions.
+- `tests/test_auth.py` covers the optional auth boundary.
 
 This separation makes it easier to understand whether a failure is policy logic, boundary math, or security regression.

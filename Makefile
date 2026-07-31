@@ -4,7 +4,7 @@ REPORT ?= data/eval_report.json
 DETERMINISM_REPORT ?= data/determinism_report.json
 MODEL ?= gpt-4.1-mini
 
-.PHONY: baseline evals openai-evals determinism score report test security-test policy-test pentest-test auth-test all clean
+.PHONY: baseline evals openai-evals determinism score report lint test security-test policy-test pentest-test auth-test all clean
 
 baseline:
 	uv run run_baseline.py \
@@ -19,7 +19,7 @@ evals:
 		--report $(REPORT)
 
 openai-evals:
-	uv run --with 'openai>=2.0.0' run_evals.py \
+	uv run --with 'openai==2.52.0' run_evals.py \
 		--openai-eval \
 		--input $(INPUT) \
 		--outputs $(OUTPUT) \
@@ -38,39 +38,23 @@ score:
 report:
 	uv run view_report.py --report $(REPORT)
 
+lint:
+	uv run --extra dev ruff check .
+
 test:
-	uv run \
-		--with 'pydantic>=2.8.0' \
-		--with 'pytest>=8.0.0' \
-		--with 'rich>=13.0.0' \
-		--with 'textual>=1.0.0' \
-		python -m pytest tests
+	uv run --extra dev python -m pytest tests
 
 security-test:
-	uv run \
-		--with 'pydantic>=2.8.0' \
-		--with 'pytest>=8.0.0' \
-		python -m pytest tests/test_security_regression.py
+	uv run --extra dev python -m pytest tests/test_security_regression.py
 
 policy-test:
-	uv run \
-		--with 'pydantic>=2.8.0' \
-		--with 'pytest>=8.0.0' \
-		python -m pytest tests/test_policy_boundaries.py
+	uv run --extra dev python -m pytest tests/test_policy_boundaries.py
 
 pentest-test:
-	uv run \
-		--with 'pydantic>=2.8.0' \
-		--with 'pytest>=8.0.0' \
-		--with 'rich>=13.0.0' \
-		--with 'textual>=1.0.0' \
-		python -m pytest tests/test_pentest_regression.py
+	uv run --extra dev python -m pytest tests/test_pentest_regression.py
 
 auth-test:
-	uv run \
-		--with 'pydantic>=2.8.0' \
-		--with 'pytest>=8.0.0' \
-		python -m pytest tests/test_auth.py
+	uv run --extra dev python -m pytest tests/test_auth.py
 
 all: baseline evals determinism score
 

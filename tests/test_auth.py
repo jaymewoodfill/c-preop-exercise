@@ -11,7 +11,6 @@ from auth import (
     triage_authenticated_submission,
 )
 
-
 SECRET = "test-secret"
 NOW = 1_800_000_000
 

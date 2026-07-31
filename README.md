@@ -37,17 +37,19 @@ This implementation is deterministic and does not call an LLM at runtime, so no 
 
 ```mermaid
 flowchart LR
-  A[Patient submission JSON] --> B[Pydantic schema validation]
-  B --> C[Deterministic policy engine]
-  C --> D[Evidence builder]
+  A[Patient submission JSON] --> B[models.py / Pydantic schema validation]
+  B --> C[rules.py / deterministic policy engine]
+  C --> D[evidence.py / evidence builder]
   D --> E[TriageOutput JSON]
   C --> F[Policy boundary tests]
-  C --> G[Security regression tests]
+  C --> G[Security and pentest regression tests]
 ```
+
+`core.py` remains as a thin compatibility module for the starter API and re-exports the public schema/helpers from the focused modules.
 
 ## Recommended Workflow
 
-1. Review `triage_submission` in `core.py`.
+1. Review `triage_submission` via `core.py` compatibility export and implementation in `rules.py`.
 2. Run baseline outputs:
 
 ```bash
@@ -113,6 +115,7 @@ Security/robustness choices influenced by AI application security experience:
 - Safe output/report path handling to avoid symlink overwrite and path traversal.
 - Bounded JSONL input size and determinism replay count to reduce resource-exhaustion risk.
 - Minimal dependency surface: existing starter dependencies only for the core workflows.
+- Dependency versions are pinned in `pyproject.toml` and locked in `uv.lock`.
 
 See also:
 
@@ -187,8 +190,20 @@ make pentest-test
 Authentication boundary tests are included in `make test` and can be run directly with:
 
 ```bash
-uv run --with 'pydantic>=2.8.0' --with 'pytest>=8.0.0' python -m pytest tests/test_auth.py
+make auth-test
 ```
+
+Run lint checks with:
+
+```bash
+make lint
+```
+
+## CI and Dependency Hygiene
+
+- `.github/workflows/ci.yml` runs lint, tests, focused security/policy/pentest/auth suites, local eval, determinism, and score printing.
+- `pyproject.toml` pins runtime/dev dependencies and configures pytest/ruff.
+- `uv.lock` captures the resolved dependency graph.
 
 ## Known Limitations
 

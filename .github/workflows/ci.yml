@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test-eval-determinism:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Run lint
+        run: make lint
+
+      - name: Run full test suite
+        run: make test
+
+      - name: Run focused security tests
+        run: make security-test
+
+      - name: Run focused policy boundary tests
+        run: make policy-test
+
+      - name: Run focused pentest regression tests
+        run: make pentest-test
+
+      - name: Run focused auth tests
+        run: make auth-test
+
+      - name: Generate baseline outputs
+        run: make baseline MODEL=unused
+
+      - name: Run local eval
+        run: make evals
+
+      - name: Run determinism check
+        run: make determinism MODEL=unused
+
+      - name: Print score
+        run: make score

@@ -2,7 +2,7 @@
 # /// script
 # requires-python = ">=3.11"
 # dependencies = [
-#   "pydantic>=2.8.0",
+#   "pydantic==2.13.4",
 # ]
 # ///
 
@@ -11,13 +11,13 @@
 from __future__ import annotations
 
 import argparse
-from collections import Counter
-from datetime import UTC, datetime
 import hashlib
 import json
-from pathlib import Path
 import re
 import time
+from collections import Counter
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from core import (

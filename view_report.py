@@ -2,8 +2,8 @@
 # /// script
 # requires-python = ">=3.11"
 # dependencies = [
-#   "textual>=1.0.0",
-#   "rich>=13.0.0",
+#   "textual==8.2.8",
+#   "rich==15.0.0",
 # ]
 # ///
 
@@ -359,7 +359,7 @@ def main() -> None:
         report = json.loads(path.read_text())
     except json.JSONDecodeError as exc:
         print(f"Invalid JSON in {path}: {exc}")
-        raise SystemExit(1)
+        raise SystemExit(1) from exc
 
     EvalReportApp(report).run()
 

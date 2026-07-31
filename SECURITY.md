@@ -75,7 +75,7 @@ This is a local CLI/library implementation, not a web service. Items below focus
 | Injection | Relevant for untrusted JSON/text | No SQL, shell, template execution, or `eval`; document text is parsed with deterministic string/date checks only; TUI report strings are Rich-markup escaped. |
 | Insecure Design | Relevant | Conservative state machine: missing/unknown data → `NEEDS_FOLLOW_UP`; acute exclusions → `NOT_CLEARED`. |
 | Security Misconfiguration | Low locally | `.gitignore` excludes generated reports and local env files; eval is local-only by default; OpenAI Eval is explicit opt-in. If deployed, disable debug logs containing PHI. |
-| Vulnerable and Outdated Components | Relevant | No added runtime dependencies; keep starter dependencies current via `uv`/dependency updates. |
+| Vulnerable and Outdated Components | Relevant | Dependencies are pinned in `pyproject.toml` and resolved in `uv.lock`; keep them current via reviewed `uv lock --upgrade` changes. |
 | Identification and Authentication Failures | Optional boundary only | `auth.py` verifies token signature/expiration and required claims; production should replace demo HMAC tokens with an IdP-managed flow. |
 | Software and Data Integrity Failures | Relevant to evaluation/release | Keep deterministic tests/evals in CI; avoid loading untrusted plugins or code. |
 | Security Logging and Monitoring Failures | Low locally | If deployed, log decisions/issue categories without unnecessary document excerpts, MRNs, names, or other PHI/PII. |
@@ -118,7 +118,7 @@ Important tradeoff: the assignment requires every issue to include exact field v
 
 | Finding | Fix |
 | --- | --- |
-| `NaN` / future-dated vitals suppress acute BP/temp exclusions | `_latest_vital(...)` ignores future-dated vitals relative to `metadata.submission_received_at` and ignores non-finite values such as `NaN`/`inf`. Older valid acute vitals can still trigger `NOT_CLEARED`. |
+| `NaN` / future-dated vitals suppress acute BP/temp exclusions | `_latest_vital(...)` ignores future-dated vitals relative to `metadata.submission_received_at`, falling back to `procedure.procedure_date` when needed, and ignores non-finite values such as `NaN`/`inf`. Older valid acute vitals can still trigger `NOT_CLEARED`. |
 | Forged consent/H&P via bare keyword match | H&P and consent classification require document-type signals; arbitrary note text containing keywords no longer satisfies documentation gates. |
 | Cancelled/fake-code labs like `NOT-CBC` satisfy CBC/CMP gates | `_is_lab(...)` tokenizes lab codes, rejects `NOT-`/fake/cancelled indicators, and requires acceptable final-like status. |
 | Anticoagulation plan keyword/negation bypass | Ambiguous/negated language is checked before hold/resume keyword acceptance. |
@@ -161,5 +161,5 @@ See [`docs/HIPAA_PRIVACY_NOTES.md`](docs/HIPAA_PRIVACY_NOTES.md) for scoped HIPA
 ## Known limitations
 
 - This is not a complete HIPAA/security compliance program.
-- No authentication, authorization, encryption-at-rest, audit logging, or tenant isolation is implemented because the starter is a local CLI/eval harness.
+- `auth.py` is an optional boundary demonstration; full production authentication, authorization, encryption-at-rest, audit logging, and tenant isolation are not implemented because the starter is a local CLI/eval harness.
 - Evidence details may include document excerpts from patient-like text. In production, downstream logs and reports should minimize or redact these fields where possible.

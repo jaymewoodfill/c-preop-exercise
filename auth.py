@@ -9,11 +9,11 @@ triage engine.
 from __future__ import annotations
 
 import base64
-from dataclasses import dataclass
 import hashlib
 import hmac
 import json
 import time
+from dataclasses import dataclass
 from typing import Any
 
 from core import PatientSubmission, TriageOutput, triage_submission
