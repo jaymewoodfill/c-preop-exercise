@@ -228,27 +228,25 @@ class EvalReportApp(App):
             )
 
     def action_cycle_filter(self) -> None:
-        # Only works when metrics table is focused
         metrics_table = self.query_one("#metrics-table", DataTable)
-        if not metrics_table.has_focus:
-            return
 
-        # Get selected metric from cursor row
-        row_key = metrics_table.coordinate_to_cell_key(metrics_table.cursor_coordinate).row_key
-        metric = row_key.value
-
-        # Toggle: if already filtering this metric, clear; otherwise set
-        if self._active_filter == metric:
-            self._active_filter = None
+        if metrics_table.has_focus:
+            row_key = metrics_table.coordinate_to_cell_key(metrics_table.cursor_coordinate).row_key
+            selected = str(row_key.value)
+            self._active_filter = None if self._active_filter == selected else selected
         else:
-            self._active_filter = metric
+            # Demo-friendly behavior: pressing `f` from the record/detail panes still
+            # cycles filters instead of silently doing nothing.
+            if self._active_filter is None:
+                self._active_filter = METRIC_NAMES[0]
+            else:
+                current_index = METRIC_NAMES.index(self._active_filter)
+                next_index = current_index + 1
+                self._active_filter = METRIC_NAMES[next_index] if next_index < len(METRIC_NAMES) else None
 
-        # Refresh record list
         record_table = self.query_one("#record-list", DataTable)
         record_table.clear()
         self._populate_record_list(record_table)
-
-        # Update header bar
         self._update_header()
 
     def _update_header(self) -> None:
